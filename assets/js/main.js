@@ -56,13 +56,14 @@ function toggleFavorite(event, btn) {
                 if (window.location.pathname.includes('favorites.php')) {
                     const card = btn.closest('.message-card');
                     if (card) {
+                        const cardType = getFavoritesCardType(card);
                         card.style.transition = 'all 0.3s ease';
                         card.style.opacity = '0';
                         card.style.transform = 'translateX(-100px)';
                         setTimeout(() => {
                             card.remove();
-                            updateFavoritesStats();
-                            checkEmptyState();
+                            updateFavoritesStats(cardType);
+                            handleFavoritesListState();
                         }, 300);
                     }
                 }
@@ -87,48 +88,97 @@ function toggleFavorite(event, btn) {
 }
 
 /**
- * 更新收藏页面统计数据
+ * 获取收藏卡片对应的留言类型（help/suggest/lost）
  */
-function updateFavoritesStats() {
-    const statNumbers = document.querySelectorAll('.favorites-stats .stat-number');
-    statNumbers.forEach(el => {
-        const current = parseInt(el.textContent) || 0;
-        if (current > 0) {
-            el.textContent = current - 1;
-        }
-    });
+function getFavoritesCardType(card) {
+    const typeEl = card.querySelector('.card-type');
+    if (!typeEl) return '';
+    const match = typeEl.className.match(/type-(help|suggest|lost)/);
+    return match ? match[1] : '';
+}
+
+/**
+ * 统计数字减 1（不小于 0）
+ */
+function decrementStatNumber(el) {
+    if (!el) return;
+    const current = parseInt(el.textContent, 10) || 0;
+    el.textContent = Math.max(0, current - 1);
+}
+
+/**
+ * 更新收藏页面统计数据
+ * 只减“全部收藏”和被取消卡片所属的分类，避免其他分类统计被误减
+ */
+function updateFavoritesStats(cardType) {
+    decrementStatNumber(document.querySelector('.favorites-stats .stat-card:first-child .stat-number'));
+
+    if (cardType) {
+        decrementStatNumber(document.querySelector('.favorites-stats .stat-card.stat-' + cardType + ' .stat-number'));
+    }
 
     const subtitle = document.querySelector('.page-subtitle');
     if (subtitle) {
         const match = subtitle.textContent.match(/\d+/);
         if (match) {
-            const current = parseInt(match[0]) || 0;
+            const current = parseInt(match[0], 10) || 0;
             subtitle.textContent = `共收藏 ${Math.max(0, current - 1)} 条留言`;
         }
     }
 }
 
 /**
- * 检查收藏页面是否为空
+ * 取消收藏后处理列表状态：
+ * - 当前页还有卡片且后续页还有数据时，刷新让后续卡片递补，避免卡片错位、数量对不上
+ * - 当前页被清空时回到最近的有效页（上一页）
+ * - 仅当收藏全部为空时才显示空态
  */
-function checkEmptyState() {
+function handleFavoritesListState() {
     const list = document.querySelector('.message-list');
-    if (!list) return;
+    const cardCount = list ? list.querySelectorAll('.message-card').length : 0;
 
-    const cards = list.querySelectorAll('.message-card');
-    if (cards.length === 0) {
-        const container = document.querySelector('.message-list-section .container');
-        if (container) {
-            container.innerHTML = `
-                <div class="empty-state">
-                    <div class="empty-icon">⭐</div>
-                    <p>暂无收藏的留言</p>
-                    <a href="index.php" class="btn btn-primary">去浏览留言</a>
-                </div>
-            `;
+    if (cardCount > 0) {
+        const hasNextPage = Array.from(document.querySelectorAll('.pagination .page-btn'))
+            .some(a => a.textContent.trim() === '下一页');
+        if (hasNextPage) {
+            window.location.reload();
         }
+        return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const page = parseInt(params.get('page') || '1', 10) || 1;
+    if (page > 1) {
+        params.set('page', String(page - 1));
+        window.location.search = params.toString();
+        return;
+    }
+
+    showFavoritesEmptyState();
+}
+
+/**
+ * 显示收藏空态（仅在收藏全部为空时调用）
+ */
+function showFavoritesEmptyState() {
+    const container = document.querySelector('.message-list-section .container');
+    if (container) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-icon">⭐</div>
+                <p>暂无收藏的留言</p>
+                <a href="index.php" class="btn btn-primary">去浏览留言</a>
+            </div>
+        `;
     }
 }
+
+// 从浏览器前进/后退缓存恢复收藏页时强制刷新，避免卡片显示旧状态
+window.addEventListener('pageshow', function (event) {
+    if (event.persisted && window.location.pathname.includes('favorites.php')) {
+        window.location.reload();
+    }
+});
 
 /**
  * 显示提示消息

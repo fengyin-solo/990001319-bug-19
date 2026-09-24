@@ -26,8 +26,18 @@ if ($type && in_array($type, ['help', 'suggest', 'lost'])) {
 $countSql = "SELECT COUNT(*) FROM favorites f INNER JOIN messages m ON f.message_id = m.id $where";
 $countStmt = $db->prepare($countSql);
 $countStmt->execute($params);
-$total = $countStmt->fetchColumn();
-$totalPages = ceil($total / $pageSize);
+$total = (int)$countStmt->fetchColumn();
+$totalPages = (int)ceil($total / $pageSize);
+
+// 页码超出有效范围时（如取消收藏后收藏总数减少），回到最近的有效页，避免停留在空页
+if ($total > 0 && $page > $totalPages) {
+    $redirect = 'favorites.php?page=' . $totalPages;
+    if ($type) {
+        $redirect .= '&type=' . urlencode($type);
+    }
+    header('Location: ' . $redirect);
+    exit;
+}
 
 $sql = "SELECT m.id, m.nickname, m.type, m.title, m.content, m.image, m.views, m.created_at, f.created_at as favorited_at 
         FROM favorites f 

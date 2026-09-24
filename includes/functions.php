@@ -119,33 +119,24 @@ function getFavoritedMessageIds() {
 /**
  * 切换收藏状态
  * 返回: ['favorited' => bool, 'action' => 'add'|'remove']
+ * 先删后插 + INSERT IGNORE，保证并发或连续重复提交时不会产生重复记录，
+ * 也不会因唯一键冲突/死锁导致操作失败
  */
 function toggleFavorite($messageId) {
     $visitorId = getVisitorId();
     $db = getDB();
 
-    $db->beginTransaction();
-    try {
-        $stmt = $db->prepare("SELECT id FROM favorites WHERE visitor_id = ? AND message_id = ? FOR UPDATE");
-        $stmt->execute([$visitorId, $messageId]);
-        $exists = $stmt->fetch();
-
-        if ($exists) {
-            $db->prepare("DELETE FROM favorites WHERE visitor_id = ? AND message_id = ?")
-                ->execute([$visitorId, $messageId]);
-            $result = ['favorited' => false, 'action' => 'remove'];
-        } else {
-            $db->prepare("INSERT INTO favorites (visitor_id, message_id) VALUES (?, ?)")
-                ->execute([$visitorId, $messageId]);
-            $result = ['favorited' => true, 'action' => 'add'];
-        }
-
-        $db->commit();
-        return $result;
-    } catch (Exception $e) {
-        $db->rollBack();
-        throw $e;
+    // 已收藏则删除，视为取消收藏
+    $stmt = $db->prepare("DELETE FROM favorites WHERE visitor_id = ? AND message_id = ?");
+    $stmt->execute([$visitorId, $messageId]);
+    if ($stmt->rowCount() > 0) {
+        return ['favorited' => false, 'action' => 'remove'];
     }
+
+    // 未收藏则插入；INSERT IGNORE 使并发/重复提交最终只保留一条记录
+    $stmt = $db->prepare("INSERT IGNORE INTO favorites (visitor_id, message_id) VALUES (?, ?)");
+    $stmt->execute([$visitorId, $messageId]);
+    return ['favorited' => true, 'action' => 'add'];
 }
 
 /**
