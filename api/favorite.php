@@ -17,9 +17,10 @@ if ($messageId <= 0) {
 
 $db = getDB();
 
-$stmt = $db->prepare("SELECT id FROM messages WHERE id = ? AND status = 1");
+$stmt = $db->prepare("SELECT id, type FROM messages WHERE id = ? AND status = 1");
 $stmt->execute([$messageId]);
-if (!$stmt->fetch()) {
+$message = $stmt->fetch();
+if (!$message) {
     jsonResponse(1, '留言不存在或未通过审核');
 }
 
@@ -29,6 +30,9 @@ try {
         jsonResponse(0, '查询成功', ['favorited' => $favorited]);
     } else {
         $result = toggleFavorite($messageId);
+        // 返回留言类型与最新收藏统计，供前端只更新对应分类，避免数字残留
+        $result['message_type'] = $message['type'];
+        $result['stats'] = getFavoriteStats();
         $msg = $result['action'] === 'add' ? '收藏成功' : '已取消收藏';
         jsonResponse(0, $msg, $result);
     }

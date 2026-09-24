@@ -639,6 +639,15 @@ a:hover { color: var(--primary-dark); }
 .favorites-stats .stat-card {
     padding: 16px;
 }
+a.stat-link {
+    text-decoration: none;
+    color: inherit;
+    display: block;
+    cursor: pointer;
+}
+.stat-link.active {
+    box-shadow: 0 0 0 2px var(--primary), var(--shadow);
+}
 .favorites-stats .stat-number {
     font-size: 1.5rem;
 }

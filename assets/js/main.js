@@ -61,9 +61,11 @@ function toggleFavorite(event, btn) {
                         card.style.transform = 'translateX(-100px)';
                         setTimeout(() => {
                             card.remove();
-                            updateFavoritesStats();
-                            checkEmptyState();
+                            updateFavoritesStats(result.data);
+                            handleFavoritesAfterRemove(result.data);
                         }, 300);
+                    } else {
+                        updateFavoritesStats(result.data);
                     }
                 }
             }
@@ -87,47 +89,98 @@ function toggleFavorite(event, btn) {
 }
 
 /**
- * 更新收藏页面统计数据
+ * 更新收藏页面统计数据（只更新总数和被取消项所属的分类，避免分类数字残留/丢失）
  */
-function updateFavoritesStats() {
-    const statNumbers = document.querySelectorAll('.favorites-stats .stat-number');
-    statNumbers.forEach(el => {
-        const current = parseInt(el.textContent) || 0;
-        if (current > 0) {
-            el.textContent = current - 1;
+function updateFavoritesStats(data) {
+    const stats = (data && data.stats) || null;
+    if (!stats) return;
+
+    const mapping = {
+        total: stats.total,
+        help: stats.help,
+        suggest: stats.suggest,
+        lost: stats.lost
+    };
+
+    document.querySelectorAll('.favorites-stats [data-stat]').forEach(el => {
+        const key = el.dataset.stat;
+        if (mapping[key] !== undefined) {
+            const numEl = el.querySelector('.stat-number');
+            if (numEl) numEl.textContent = mapping[key];
         }
     });
 
     const subtitle = document.querySelector('.page-subtitle');
     if (subtitle) {
-        const match = subtitle.textContent.match(/\d+/);
-        if (match) {
-            const current = parseInt(match[0]) || 0;
-            subtitle.textContent = `共收藏 ${Math.max(0, current - 1)} 条留言`;
-        }
+        subtitle.textContent = `共收藏 ${stats.total} 条留言`;
     }
 }
 
 /**
- * 检查收藏页面是否为空
+ * 取消收藏后处理收藏页列表：
+ * - 页内仍有卡片：只移除卡片即可
+ * - 当前页变空但其他页还有数据：跳到最近的有效页（保留当前分类筛选）
+ * - 所有收藏都为空：才显示空态
  */
-function checkEmptyState() {
+function handleFavoritesAfterRemove(data) {
     const list = document.querySelector('.message-list');
     if (!list) return;
 
-    const cards = list.querySelectorAll('.message-card');
-    if (cards.length === 0) {
-        const container = document.querySelector('.message-list-section .container');
-        if (container) {
-            container.innerHTML = `
-                <div class="empty-state">
-                    <div class="empty-icon">⭐</div>
-                    <p>暂无收藏的留言</p>
-                    <a href="index.php" class="btn btn-primary">去浏览留言</a>
-                </div>
-            `;
-        }
+    const stats = (data && data.stats) || {};
+    const remainingCards = list.querySelectorAll('.message-card');
+
+    // 页内还有卡片，布局不会错位，无需跳转
+    if (remainingCards.length > 0) return;
+
+    const params = new URLSearchParams(window.location.search);
+    const currentType = ['help', 'suggest', 'lost'].includes(params.get('type')) ? params.get('type') : '';
+
+    const filterCount = currentType
+        ? (stats[currentType] !== undefined ? stats[currentType] : 0)
+        : (stats.total || 0);
+
+    // 全部收藏为空（或当前筛选下为空且其他分类也没有）→ 进入空态
+    if ((stats.total || 0) === 0) {
+        showFavoritesEmptyState();
+        return;
     }
+
+    // 当前分类被取消完但其他分类还有收藏，回退到“全部”列表
+    if (filterCount === 0) {
+        window.location.assign('favorites.php');
+        return;
+    }
+
+    // 当前筛选还有数据但本页空了：回到最近的有效页
+    const pageSize = 10;
+    const lastPage = Math.max(1, Math.ceil(filterCount / pageSize));
+    const currentPage = parseInt(params.get('page'), 10) || 1;
+    if (currentPage > lastPage) {
+        const query = new URLSearchParams();
+        query.set('page', String(lastPage));
+        if (currentType) query.set('type', currentType);
+        window.location.assign('favorites.php?' + query.toString());
+    } else {
+        // 理论上不会发生；兜底重载，由服务端钳制到正确页码
+        window.location.reload();
+    }
+}
+
+/**
+ * 显示收藏页空态
+ */
+function showFavoritesEmptyState() {
+    const container = document.querySelector('.message-list-section .container');
+    if (!container) return;
+
+    // 旧分页与列表随空态一并移除，避免残留元素造成错位
+    container.innerHTML = `
+        <div class="empty-state">
+            <div class="empty-icon">⭐</div>
+            <p>暂无收藏的留言</p>
+            <a href="index.php" class="btn btn-primary">去浏览留言</a>
+        </div>
+    `;
 }
 
 /**
@@ -303,4 +356,14 @@ function submitReport() {
 
 document.addEventListener('DOMContentLoaded', function() {
     initReportForm();
+});
+
+/**
+ * 从浏览器往返缓存（bfcache）恢复页面时强制重新加载，
+ * 避免后退进入时卡片收藏状态、统计数字停留在旧快照
+ */
+window.addEventListener('pageshow', function(event) {
+    if (event.persisted) {
+        window.location.reload();
+    }
 });

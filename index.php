@@ -14,7 +14,6 @@ $sort = $_GET['sort'] ?? 'time';
 $type = $_GET['type'] ?? '';
 $page = max(1, intval($_GET['page'] ?? 1));
 $pageSize = 10;
-$offset = ($page - 1) * $pageSize;
 
 // 构建查询
 $where = "WHERE status = 1";
@@ -31,8 +30,17 @@ $orderBy = ($sort === 'hot') ? "views DESC, created_at DESC" : "created_at DESC"
 // 总数
 $countStmt = $db->prepare("SELECT COUNT(*) FROM messages $where");
 $countStmt->execute($params);
-$total = $countStmt->fetchColumn();
-$totalPages = ceil($total / $pageSize);
+$total = (int) $countStmt->fetchColumn();
+$totalPages = max(1, (int) ceil($total / $pageSize));
+
+// 页码越界时回到最近有效页，避免停留在没有数据的空页码
+if ($page > $totalPages && $total > 0) {
+    $query = http_build_query(array_filter(['page' => $totalPages, 'sort' => $sort !== 'time' ? $sort : null, 'type' => $type]));
+    header('Location: index.php?' . $query);
+    exit;
+}
+$page = min($page, $totalPages);
+$offset = ($page - 1) * $pageSize;
 
 // 列表
 $sql = "SELECT id, nickname, type, title, content, image, views, created_at FROM messages $where ORDER BY $orderBy LIMIT $pageSize OFFSET $offset";
@@ -148,7 +156,7 @@ include __DIR__ . '/includes/header.php';
                         <span class="card-views">👁 <?= $msg['views'] ?></span>
                     </div>
                 </a>
-                <button class="favorite-btn <?= isset($favoritedIds[$msg['id']]) ? 'favorited' : '' ?>" data-message-id="<?= $msg['id'] ?>" onclick="toggleFavorite(event, this)">
+                <button class="favorite-btn <?= isset($favoritedIds[$msg['id']]) ? 'favorited' : '' ?>" data-message-id="<?= $msg['id'] ?>" data-type="<?= $msg['type'] ?>" onclick="toggleFavorite(event, this)">
                     <span class="favorite-icon"><?= isset($favoritedIds[$msg['id']]) ? '⭐' : '☆' ?></span>
                     <span class="favorite-text"><?= isset($favoritedIds[$msg['id']]) ? '已收藏' : '收藏' ?></span>
                 </button>

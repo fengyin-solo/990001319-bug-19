@@ -64,7 +64,7 @@ include __DIR__ . '/includes/header.php';
             <div class="detail-actions">
                 <a href="index.php" class="btn btn-secondary">← 返回列表</a>
                 <?php $isFav = isFavorited($msg['id']); ?>
-                <button class="btn favorite-detail-btn <?= $isFav ? 'btn-warning' : 'btn-secondary' ?>" data-message-id="<?= $msg['id'] ?>" onclick="toggleFavorite(event, this)">
+                <button class="btn favorite-detail-btn <?= $isFav ? 'btn-warning' : 'btn-secondary' ?>" data-message-id="<?= $msg['id'] ?>" data-type="<?= $msg['type'] ?>" onclick="toggleFavorite(event, this)">
                     <span class="favorite-icon"><?= $isFav ? '⭐' : '☆' ?></span>
                     <span class="favorite-text"><?= $isFav ? '已收藏' : '收藏' ?></span>
                 </button>

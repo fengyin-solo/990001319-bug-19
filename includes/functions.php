@@ -117,7 +117,32 @@ function getFavoritedMessageIds() {
 }
 
 /**
- * 切换收藏状态
+ * 获取当前访客的收藏统计（仅统计已通过审核的留言）
+ * 返回: ['total' => int, 'help' => int, 'suggest' => int, 'lost' => int]
+ */
+function getFavoriteStats($visitorId = null) {
+    $visitorId = $visitorId ?: getVisitorId();
+    $db = getDB();
+    $stmt = $db->prepare("SELECT
+        COUNT(*) AS total,
+        COALESCE(SUM(CASE WHEN m.type = 'help' THEN 1 ELSE 0 END), 0) AS help_count,
+        COALESCE(SUM(CASE WHEN m.type = 'suggest' THEN 1 ELSE 0 END), 0) AS suggest_count,
+        COALESCE(SUM(CASE WHEN m.type = 'lost' THEN 1 ELSE 0 END), 0) AS lost_count
+        FROM favorites f
+        INNER JOIN messages m ON f.message_id = m.id
+        WHERE f.visitor_id = ? AND m.status = 1");
+    $stmt->execute([$visitorId]);
+    $row = $stmt->fetch();
+    return [
+        'total' => (int) $row['total'],
+        'help' => (int) $row['help_count'],
+        'suggest' => (int) $row['suggest_count'],
+        'lost' => (int) $row['lost_count'],
+    ];
+}
+
+/**
+ * 切换收藏状态（幂等：并发下不会产生重复记录，也不会因唯一键冲突而失败）
  * 返回: ['favorited' => bool, 'action' => 'add'|'remove']
  */
 function toggleFavorite($messageId) {
@@ -126,6 +151,7 @@ function toggleFavorite($messageId) {
 
     $db->beginTransaction();
     try {
+        // 行锁串行化同一访客对同一留言的并发操作，避免连续点击产生竞态
         $stmt = $db->prepare("SELECT id FROM favorites WHERE visitor_id = ? AND message_id = ? FOR UPDATE");
         $stmt->execute([$visitorId, $messageId]);
         $exists = $stmt->fetch();
@@ -135,15 +161,18 @@ function toggleFavorite($messageId) {
                 ->execute([$visitorId, $messageId]);
             $result = ['favorited' => false, 'action' => 'remove'];
         } else {
-            $db->prepare("INSERT INTO favorites (visitor_id, message_id) VALUES (?, ?)")
-                ->execute([$visitorId, $messageId]);
+            // INSERT IGNORE：即使在锁间隙发生并发插入，也只会被忽略而不是抛唯一键错误
+            $insert = $db->prepare("INSERT IGNORE INTO favorites (visitor_id, message_id) VALUES (?, ?)");
+            $insert->execute([$visitorId, $messageId]);
             $result = ['favorited' => true, 'action' => 'add'];
         }
 
         $db->commit();
         return $result;
     } catch (Exception $e) {
-        $db->rollBack();
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
         throw $e;
     }
 }
